@@ -86,6 +86,9 @@ WiFiManager wifiManager;
 // ========== OLED Display Variable ==========
 Adafruit_SSD1306 display(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RESET);
 bool oled_available = false;
+char oled_status_line1[22] = "";
+char oled_status_line2[22] = "";
+bool oled_show_status = false;
 
 // ========== Function Prototypes ==========
 void toggleRelay(int relayPin, bool& relayState);
@@ -99,6 +102,9 @@ void fetchAirQualityData();
 void printWeatherData();
 void initOLED();
 void updateOLED();
+void showOLEDStatus(const char* title, const char* line1 = "", const char* line2 = "");
+void clearOLEDStatus();
+void checkStartupWiFiReset();
 void drawRelayStatus(int x, int y, const char* label, bool state);
 const char* getAQILabel(int aqi);
 
@@ -107,10 +113,6 @@ void setup() {
   // Initialize Serial
   Serial.begin(115200);
   delay(1000);
-
-  // Initialize OLED before WiFi so startup/config status can be shown.
-  initOLED();
-  updateOLED();
   
   // Set Relay Pins as OUTPUT
   pinMode(RELAY1_PIN, OUTPUT);
@@ -126,6 +128,12 @@ void setup() {
   pinMode(SWITCH1_PIN, INPUT);
   pinMode(SWITCH2_PIN, INPUT);
   pinMode(SWITCH3_PIN, INPUT);
+
+  // Initialize OLED after GPIO setup so SW1 boot reset status can be shown.
+  initOLED();
+  showOLEDStatus("System Boot", "Hold SW1 5 sec", "Reset WiFi");
+  delay(500);
+  checkStartupWiFiReset();
   
   // Print initialization message
   Serial.println("\n========================================");
@@ -142,13 +150,14 @@ void setup() {
   
   // Initialize WiFiManager
   Serial.println("Initializing WiFi Manager...");
+  showOLEDStatus("WiFi Setup", "Connecting...", "Please wait");
   wifiManager.setAPCallback([](WiFiManager *wiFiManager) {
     Serial.println("\n[WiFi] Entered Config Portal");
     Serial.print("[WiFi] Access Point SSID: ");
     Serial.println(AP_SSID);
     Serial.print("[WiFi] Access Point Password: ");
     Serial.println(AP_PASSWORD);
-    updateOLED();
+    showOLEDStatus("Config Portal", AP_SSID, "Open WiFi setup");
   });
   
   wifiManager.setConfigPortalTimeout(180);  // 3 minutes timeout
@@ -156,7 +165,13 @@ void setup() {
   // Auto-connect or start config portal
   if (!wifiManager.autoConnect(AP_SSID, AP_PASSWORD)) {
     Serial.println("[WiFi] Failed to connect, reset will be attempted");
+    showOLEDStatus("WiFi Failed", "Config timeout", "Restarting...");
+    delay(1500);
+  } else {
+    showOLEDStatus("WiFi Connected", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
+    delay(1500);
   }
+  clearOLEDStatus();
   updateOLED();
   
   Serial.println("[Setup] Initialization Complete!");
@@ -327,6 +342,7 @@ void checkSW1LongPress() {
       if (pressTime >= WIFI_RESET_HOLD_TIME) {
         sw1_long_press_triggered = true;
         Serial.println("\n[SW1] Long Press DETECTED (5 seconds) - Resetting WiFi Configuration!");
+        showOLEDStatus("WiFi Reset", "SW1 hold 5 sec", "Restarting...");
         resetWiFiConfiguration();
       }
     }
@@ -349,12 +365,14 @@ void checkSW1LongPress() {
 void resetWiFiConfiguration() {
   Serial.println("\n========== WiFi Reset Starting ==========");
   Serial.println("[WiFi] Resetting saved WiFi configuration...");
+  showOLEDStatus("WiFi Reset", "Clearing saved", "settings...");
   
   // Reset WiFi settings
   wifiManager.resetSettings();
   
   Serial.println("[WiFi] Configuration reset complete!");
   Serial.println("[WiFi] Restarting in 2 seconds...");
+  showOLEDStatus("WiFi Reset Done", "Restarting ESP32", "");
   delay(2000);
   
   // Restart ESP32
@@ -548,10 +566,91 @@ void initOLED() {
 }
 
 /**
+ * Show a setup/status screen on the OLED.
+ */
+void showOLEDStatus(const char* title, const char* line1, const char* line2) {
+  strncpy(oled_status_line1, line1, sizeof(oled_status_line1) - 1);
+  oled_status_line1[sizeof(oled_status_line1) - 1] = '\0';
+  strncpy(oled_status_line2, line2, sizeof(oled_status_line2) - 1);
+  oled_status_line2[sizeof(oled_status_line2) - 1] = '\0';
+  oled_show_status = true;
+
+  if (!oled_available) {
+    return;
+  }
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.drawRoundRect(0, 0, OLED_WIDTH, OLED_HEIGHT, 4, SSD1306_WHITE);
+  display.fillRect(0, 0, OLED_WIDTH, 13, SSD1306_WHITE);
+  display.setTextColor(SSD1306_BLACK);
+  display.setCursor(4, 3);
+  display.print(title);
+
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(8, 22);
+  display.print(oled_status_line1);
+  display.setCursor(8, 36);
+  display.print(oled_status_line2);
+  display.display();
+}
+
+/**
+ * Return the OLED to the normal dashboard screen.
+ */
+void clearOLEDStatus() {
+  oled_show_status = false;
+  oled_status_line1[0] = '\0';
+  oled_status_line2[0] = '\0';
+}
+
+/**
+ * During setup, holding SW1 for 5 seconds clears saved WiFi settings.
+ */
+void checkStartupWiFiReset() {
+  if (digitalRead(SWITCH1_PIN) == HIGH) {
+    return;
+  }
+
+  Serial.println("[Setup] SW1 held during boot - checking for WiFi reset...");
+  unsigned long holdStart = millis();
+  unsigned long lastSecondShown = 0;
+
+  while (digitalRead(SWITCH1_PIN) == LOW) {
+    unsigned long holdTime = millis() - holdStart;
+    unsigned long secondsHeld = holdTime / 1000;
+
+    if (secondsHeld != lastSecondShown) {
+      lastSecondShown = secondsHeld;
+      char line2[22];
+      snprintf(line2, sizeof(line2), "%lu / 5 seconds", secondsHeld);
+      showOLEDStatus("Hold SW1", "Reset WiFi?", line2);
+      Serial.printf("[Setup] SW1 hold: %lu seconds\n", secondsHeld);
+    }
+
+    if (holdTime >= WIFI_RESET_HOLD_TIME) {
+      Serial.println("[Setup] Startup WiFi reset triggered");
+      resetWiFiConfiguration();
+    }
+
+    delay(50);
+  }
+
+  Serial.println("[Setup] SW1 released before reset threshold");
+  showOLEDStatus("WiFi Reset", "Cancelled", "Continue boot");
+  delay(800);
+}
+
+/**
  * Draw weather data and relay status on the OLED.
  */
 void updateOLED() {
   if (!oled_available) {
+    return;
+  }
+
+  if (oled_show_status) {
     return;
   }
 
