@@ -2,6 +2,29 @@
 
 โปรเจกต์นี้เป็นโปรแกรมสำหรับบอร์ด **ESP32 DevKit** ที่พัฒนาด้วย **PlatformIO + Arduino Framework** ใช้สำหรับควบคุม Relay 3 ช่องด้วย Switch 3 ปุ่ม พร้อมเชื่อมต่อ WiFi ผ่าน WiFiManager, ดึงข้อมูลสภาพอากาศจาก OpenWeather และแสดงผลบนจอ **OLED 0.96 นิ้ว I2C**
 
+## สารบัญ
+
+- [ภาพรวมของโปรเจกต์](#ภาพรวมของโปรเจกต์)
+- [Hardware ที่ใช้](#hardware-ที่ใช้)
+- [Pin Mapping](#pin-mapping)
+- [Library ที่เกี่ยวข้อง](#library-ที่เกี่ยวข้อง)
+- [โครงสร้างไฟล์สำคัญ](#โครงสร้างไฟล์สำคัญ)
+- [การตั้งค่า PlatformIO](#การตั้งค่า-platformio)
+- [วิธีเปิดโปรแกรมด้วย VS Code](#วิธีเปิดโปรแกรมด้วย-vs-code)
+- [วิธี Build](#วิธี-build)
+- [วิธี Upload ลง ESP32](#วิธี-upload-ลง-esp32)
+- [วิธีเปิด Serial Monitor](#วิธีเปิด-serial-monitor)
+- [วิธีใช้งาน WiFiManager](#วิธีใช้งาน-wifimanager)
+- [การ Reset WiFi ด้วย SW1](#การ-reset-wifi-ด้วย-sw1)
+- [การแสดงผลบน OLED](#การแสดงผลบน-oled)
+- [OpenWeather API](#openweather-api)
+- [Logic การทำงานของ Relay และ Switch](#logic-การทำงานของ-relay-และ-switch)
+- [ข้อควรระวังด้าน Hardware](#ข้อควรระวังด้าน-hardware)
+- [Troubleshooting](#troubleshooting)
+- [สถานะล่าสุดของโปรเจกต์](#สถานะล่าสุดของโปรเจกต์)
+- [คำสั่งที่ใช้บ่อย](#คำสั่งที่ใช้บ่อย)
+- [หมายเหตุ](#หมายเหตุ)
+
 ## ภาพรวมของโปรเจกต์
 
 ระบบนี้ทำงานหลัก ๆ ดังนี้:
@@ -409,4 +432,3 @@ C:\Users\Dell\.platformio\penv\Scripts\platformio.exe device monitor -b 115200
 ## หมายเหตุ
 
 เอกสารนี้อ้างอิงจากโค้ดปัจจุบันใน `src/main.cpp` และการตั้งค่าปัจจุบันใน `platformio.ini`
-
