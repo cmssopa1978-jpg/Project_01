@@ -111,10 +111,80 @@ ESP32 รองรับ BLE สำหรับการสื่อสารแ
 - Echo → GPIO (ผ่าน Voltage Divider เพื่อลดจาก 5V เป็น 3.3V)
 
 ### OLED Display (I2C)
-- VCC → 3V3
-- GND → GND
-- SCL → GPIO 22
-- SDA → GPIO 21
+- ขนาดที่พบบ่อย: **0.96 นิ้ว**, ความละเอียด **128x64 pixels**
+- Controller ที่พบบ่อย: **SSD1306**
+- Interface: **I2C** ใช้สายสัญญาณ 2 เส้น คือ SDA และ SCL
+- I2C Address ที่พบบ่อย: **0x3C** (บางรุ่นอาจเป็น **0x3D**)
+
+#### การต่อสาย OLED 0.96 I2C กับ ESP32 DevKit
+
+| OLED Pin | ESP32 DevKit Pin | หมายเหตุ |
+|----------|------------------|----------|
+| VCC | 3V3 | แนะนำใช้ 3.3V เพื่อให้ระดับสัญญาณปลอดภัยกับ ESP32 |
+| GND | GND | กราวด์ร่วม |
+| SCL | GPIO 22 | I2C Clock ค่าเริ่มต้นของ ESP32 |
+| SDA | GPIO 21 | I2C Data ค่าเริ่มต้นของ ESP32 |
+
+#### Library ที่แนะนำสำหรับ PlatformIO
+
+เพิ่มใน `platformio.ini`:
+
+```ini
+lib_deps =
+	adafruit/Adafruit SSD1306@^2.5.13
+	adafruit/Adafruit GFX Library@^1.12.1
+```
+
+> หากมี `lib_deps` เดิมอยู่แล้ว ให้เพิ่ม 2 บรรทัดนี้ต่อท้ายรายการเดิม
+
+#### ตัวอย่างโค้ดทดสอบ OLED 0.96 I2C
+
+```cpp
+#include <Arduino.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+#define OLED_ADDRESS 0x3C
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+void setup() {
+  Serial.begin(115200);
+
+  Wire.begin(21, 22);  // SDA = GPIO21, SCL = GPIO22
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS)) {
+    Serial.println("OLED allocation failed or display not found");
+    while (true) {
+      delay(1000);
+    }
+  }
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println("ESP32 DevKit");
+  display.println("OLED 0.96 I2C");
+  display.println("SDA: GPIO21");
+  display.println("SCL: GPIO22");
+  display.display();
+}
+
+void loop() {
+}
+```
+
+#### ข้อควรระวัง
+
+1. ถ้าจอไม่แสดงผล ให้ลองเปลี่ยน `OLED_ADDRESS` จาก `0x3C` เป็น `0x3D`
+2. โมดูล OLED บางรุ่นรับไฟได้ทั้ง 3.3V และ 5V แต่เมื่อใช้กับ ESP32 แนะนำต่อ VCC เข้ากับ **3V3**
+3. หากต่ออุปกรณ์ I2C หลายตัวร่วมกัน ต้องตรวจสอบว่าแต่ละอุปกรณ์มี I2C Address ไม่ซ้ำกัน
+4. สาย SDA/SCL ไม่ควรยาวเกินไป เพราะอาจทำให้สัญญาณ I2C ไม่เสถียร
 
 ## 10. โหมด Sleep และการประหยัดพลังงาน
 

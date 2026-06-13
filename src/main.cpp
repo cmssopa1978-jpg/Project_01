@@ -1,10 +1,34 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiManager.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+// ========== OpenWeather API Configuration ==========
+#define OPENWEATHER_API_KEY "03169a21d57223736ed597768ebad921"  // Get from https://openweathermap.org/api
+#define CITY_NAME "Chiang Mai"
+#define CITY_LAT 18.7883
+#define CITY_LON 98.9853
+#define WEATHER_UPDATE_INTERVAL 60000   // 1 minute in milliseconds
+#define OPENWEATHER_WEATHER_URL "http://api.openweathermap.org/data/2.5/weather"
+#define OPENWEATHER_AQI_URL "http://api.openweathermap.org/data/2.5/air_pollution"
+
+// ========== OLED Display Configuration ==========
+#define OLED_SDA_PIN 21
+#define OLED_SCL_PIN 22
+#define OLED_WIDTH 128
+#define OLED_HEIGHT 64
+#define OLED_RESET -1
+#define OLED_ADDRESS 0x3C
+#define OLED_REFRESH_INTERVAL 1000
 
 // ========== WiFi Configuration ==========
-const char* ssid = "SOPA_Wifi";           // Change to your WiFi SSID
-const char* password = "21072521";        // Change to your WiFi Password
-#define WIFI_CONNECT_TIMEOUT 20000        // 20 seconds timeout
+#define WIFI_RESET_HOLD_TIME 5000  // 5 seconds to reset WiFi
+#define AP_SSID "ESP32_CONFIG"     // Access Point SSID
+#define AP_PASSWORD "12345678"     // Access Point Password
 
 // ========== GPIO Pin Definitions ==========
 // Relay Pins (Active Low: LOW=ON, HIGH=OFF)
@@ -23,6 +47,22 @@ const char* password = "21072521";        // Change to your WiFi Password
 #define WIFI_STATUS_CHECK_INTERVAL 60000  // 60 seconds WiFi status check
 unsigned long lastSwitchCheckTime = 0;
 unsigned long lastWiFiCheckTime = 0;
+unsigned long lastWeatherUpdateTime = 0;
+unsigned long lastOledRefreshTime = 0;
+
+// ========== Weather Data Variables ==========
+struct WeatherData {
+  float temperature = 0.0;
+  float feels_like = 0.0;
+  float humidity = 0.0;
+  float pressure = 0.0;
+  String weather_description = "N/A";
+  float wind_speed = 0.0;
+  int aqi = 0;  // 1=Good, 2=Fair, 3=Moderate, 4=Poor, 5=Very Poor
+  float pm25 = 0.0;
+  float pm10 = 0.0;
+  unsigned long last_update = 0;
+} weatherData;
 
 // ========== Relay State Variables ==========
 bool relay1_state = false;  // false = OFF, true = ON
@@ -34,21 +74,43 @@ int sw1_prev_state = HIGH;
 int sw2_prev_state = HIGH;
 int sw3_prev_state = HIGH;
 
+// ========== SW1 Long Press Variables ==========
+unsigned long sw1_press_start_time = 0;
+bool sw1_long_press_triggered = false;
+int sw1_long_press_prev_state = HIGH;  // Separate for long press detection
+
 // ========== WiFi Status Variable ==========
 bool wifi_connected = false;
+WiFiManager wifiManager;
+
+// ========== OLED Display Variable ==========
+Adafruit_SSD1306 display(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RESET);
+bool oled_available = false;
 
 // ========== Function Prototypes ==========
 void toggleRelay(int relayPin, bool& relayState);
 bool isSwitchPressedOnce(int switchPin, int& prevState);
 void connectWiFi();
 void printWiFiStatus();
-bool isSwitchPressedOnce(int switchPin, int& prevState);
+void checkSW1LongPress();
+void resetWiFiConfiguration();
+void fetchWeatherData();
+void fetchAirQualityData();
+void printWeatherData();
+void initOLED();
+void updateOLED();
+void drawRelayStatus(int x, int y, const char* label, bool state);
+const char* getAQILabel(int aqi);
 
 // ========== Setup ==========
 void setup() {
   // Initialize Serial
   Serial.begin(115200);
   delay(1000);
+
+  // Initialize OLED before WiFi so startup/config status can be shown.
+  initOLED();
+  updateOLED();
   
   // Set Relay Pins as OUTPUT
   pinMode(RELAY1_PIN, OUTPUT);
@@ -73,20 +135,67 @@ void setup() {
   Serial.println("Relay2 (GPIO16) - Toggle via SW2");
   Serial.println("Relay3 (GPIO4)  - Toggle via SW3");
   Serial.println("\nSwitch Configuration:");
-  Serial.println("SW1 (GPIO34) - Active Low with Pull-up");
+  Serial.println("SW1 (GPIO34) - Active Low with Pull-up (Hold 5s to Reset WiFi)");
   Serial.println("SW2 (GPIO35) - Active Low with Pull-up");
   Serial.println("SW3 (GPIO32) - Active Low with Pull-up");
   Serial.println("========================================\n");
   
-  // Connect to WiFi
-  Serial.println("Connecting to WiFi...");
-  connectWiFi();
+  // Initialize WiFiManager
+  Serial.println("Initializing WiFi Manager...");
+  wifiManager.setAPCallback([](WiFiManager *wiFiManager) {
+    Serial.println("\n[WiFi] Entered Config Portal");
+    Serial.print("[WiFi] Access Point SSID: ");
+    Serial.println(AP_SSID);
+    Serial.print("[WiFi] Access Point Password: ");
+    Serial.println(AP_PASSWORD);
+    updateOLED();
+  });
+  
+  wifiManager.setConfigPortalTimeout(180);  // 3 minutes timeout
+  
+  // Auto-connect or start config portal
+  if (!wifiManager.autoConnect(AP_SSID, AP_PASSWORD)) {
+    Serial.println("[WiFi] Failed to connect, reset will be attempted");
+  }
+  updateOLED();
+  
+  Serial.println("[Setup] Initialization Complete!");
+  
+  // Check OpenWeather API Key
+  Serial.println("\n========== Weather Data Configuration ==========");
+  if (strcmp(OPENWEATHER_API_KEY, "YOUR_API_KEY") == 0) {
+    Serial.println("[Weather] WARNING: API Key not set!");
+    Serial.println("[Weather] Get API key from: https://openweathermap.org/api");
+    Serial.println("[Weather] Update OPENWEATHER_API_KEY in main.cpp");
+  } else {
+    Serial.println("[Weather] API Key configured");
+    Serial.println("[Weather] Location: Chiang Mai (18.7883°N, 98.9853°E)");
+    Serial.println("[Weather] Update Interval: 2 minutes");
+    Serial.println("[Weather] Data: Temperature, Humidity, AQI, PM2.5, PM10");
+    Serial.println("=============================================\n");
+  }
 }
 
 // ========== Main Loop ==========
 void loop() {
   // Poll switches at regular intervals (non-blocking)
   unsigned long currentTime = millis();
+  
+  // Check SW1 Long Press for WiFi Reset
+  checkSW1LongPress();
+  
+  // Fetch Weather Data Periodically (every 2 minutes)
+  if (currentTime - lastWeatherUpdateTime >= WEATHER_UPDATE_INTERVAL) {
+    lastWeatherUpdateTime = currentTime;
+    
+    if (WiFi.status() == WL_CONNECTED && strcmp(OPENWEATHER_API_KEY, "YOUR_API_KEY") != 0) {
+      Serial.println("\n[Weather] Fetching data...");
+      fetchWeatherData();
+      fetchAirQualityData();
+      printWeatherData();
+      updateOLED();
+    }
+  }
   
   // Check WiFi Status Periodically
   if (currentTime - lastWiFiCheckTime >= WIFI_STATUS_CHECK_INTERVAL) {
@@ -97,18 +206,26 @@ void loop() {
       printWiFiStatus();
     } else {
       Serial.println("[WiFi] Connection LOST - Attempting to reconnect...");
-      connectWiFi();
+      updateOLED();
+      wifiManager.autoConnect(AP_SSID, AP_PASSWORD);
+      updateOLED();
     }
+  }
+
+  if (currentTime - lastOledRefreshTime >= OLED_REFRESH_INTERVAL) {
+    lastOledRefreshTime = currentTime;
+    updateOLED();
   }
   
   if (currentTime - lastSwitchCheckTime >= SWITCH_POLL_INTERVAL) {
     lastSwitchCheckTime = currentTime;
     
-    // Check SW1 - Toggle Relay1
-    if (isSwitchPressedOnce(SWITCH1_PIN, sw1_prev_state)) {
+    // Check SW1 - Toggle Relay1 (only if not in long press mode)
+    if (!sw1_long_press_triggered && isSwitchPressedOnce(SWITCH1_PIN, sw1_prev_state)) {
       toggleRelay(RELAY1_PIN, relay1_state);
       Serial.println("[EVENT] SW1 (GPIO34) Pressed -> Relay1 (GPIO17) Toggled");
       Serial.printf("Relay1 is now: %s\n", relay1_state ? "ON" : "OFF");
+      updateOLED();
     }
     
     // Check SW2 - Toggle Relay2
@@ -116,6 +233,7 @@ void loop() {
       toggleRelay(RELAY2_PIN, relay2_state);
       Serial.println("[EVENT] SW2 (GPIO35) Pressed -> Relay2 (GPIO16) Toggled");
       Serial.printf("Relay2 is now: %s\n", relay2_state ? "ON" : "OFF");
+      updateOLED();
     }
     
     // Check SW3 - Toggle Relay3
@@ -123,6 +241,7 @@ void loop() {
       toggleRelay(RELAY3_PIN, relay3_state);
       Serial.println("[EVENT] SW3 (GPIO32) Pressed -> Relay3 (GPIO4) Toggled");
       Serial.printf("Relay3 is now: %s\n", relay3_state ? "ON" : "OFF");
+      updateOLED();
     }
   }
 }
@@ -178,40 +297,77 @@ bool isSwitchPressedOnce(int switchPin, int& prevState) {
 }
 
 /**
- * Connect to WiFi Network
+ * Check SW1 for Long Press (5 seconds) to Reset WiFi Configuration
  */
-void connectWiFi() {
-  unsigned long startTime = millis();
+void checkSW1LongPress() {
+  int sw1_current = digitalRead(SWITCH1_PIN);
   
-  // Disconnect any existing WiFi connection
-  WiFi.disconnect(true);  // true = turn off WiFi radio
-  delay(100);
+  // Detect button press (HIGH -> LOW)
+  if (sw1_current == LOW && sw1_long_press_prev_state == HIGH) {
+    sw1_press_start_time = millis();
+    sw1_long_press_triggered = false;
+    Serial.println("[SW1] Button Press Detected - Starting timer...");
+  }
   
-  // Set WiFi mode to Station
-  WiFi.mode(WIFI_STA);
-  
-  // Begin WiFi connection
-  WiFi.begin(ssid, password);
-  
-  Serial.print("\nConnecting to WiFi: ");
-  Serial.println(ssid);
-  
-  // Wait for connection or timeout
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
+  // Check if button is still pressed and 5 seconds have elapsed
+  if (sw1_current == LOW && !sw1_long_press_triggered) {
+    unsigned long pressTime = millis() - sw1_press_start_time;
     
-    // Check for timeout
-    if (millis() - startTime > WIFI_CONNECT_TIMEOUT) {
-      Serial.println("\n[WiFi] Connection FAILED - Timeout!");
-      wifi_connected = false;
-      return;
+    // Debounce check
+    if (pressTime > DEBOUNCE_DELAY) {
+      // Print countdown every second
+      static unsigned long lastPrintTime = 0;
+      if (pressTime - lastPrintTime >= 1000) {
+        unsigned long secondsElapsed = (pressTime / 1000);
+        Serial.printf("[SW1] Hold time: %lu seconds...\n", secondsElapsed + 1);
+        lastPrintTime = pressTime;
+      }
+      
+      // Check if long press threshold reached
+      if (pressTime >= WIFI_RESET_HOLD_TIME) {
+        sw1_long_press_triggered = true;
+        Serial.println("\n[SW1] Long Press DETECTED (5 seconds) - Resetting WiFi Configuration!");
+        resetWiFiConfiguration();
+      }
     }
   }
   
-  Serial.println("\n[WiFi] Connected Successfully!");
-  wifi_connected = true;
-  printWiFiStatus();
+  // Detect button release (LOW -> HIGH)
+  if (sw1_current == HIGH && sw1_long_press_prev_state == LOW) {
+    sw1_long_press_triggered = false;
+    if (millis() - sw1_press_start_time < WIFI_RESET_HOLD_TIME) {
+      Serial.println("[SW1] Button Released (Short Press)");
+    }
+  }
+  
+  sw1_long_press_prev_state = sw1_current;
+}
+
+/**
+ * Reset WiFi Configuration and Enter Config Portal
+ */
+void resetWiFiConfiguration() {
+  Serial.println("\n========== WiFi Reset Starting ==========");
+  Serial.println("[WiFi] Resetting saved WiFi configuration...");
+  
+  // Reset WiFi settings
+  wifiManager.resetSettings();
+  
+  Serial.println("[WiFi] Configuration reset complete!");
+  Serial.println("[WiFi] Restarting in 2 seconds...");
+  delay(2000);
+  
+  // Restart ESP32
+  ESP.restart();
+}
+
+/**
+ * Connect to WiFi Network using WiFiManager
+ */
+void connectWiFi() {
+  if (!wifiManager.autoConnect(AP_SSID, AP_PASSWORD)) {
+    Serial.println("[WiFi] Failed to connect and timeout occurred");
+  }
 }
 
 /**
@@ -236,4 +392,260 @@ void printWiFiStatus() {
   Serial.println(" dBm");
   
   Serial.println("================================\n");
+}
+
+/**
+ * Fetch Weather Data from OpenWeather API
+ */
+void fetchWeatherData() {
+  WiFiClient client;
+  HTTPClient http;
+  
+  // Build URL with parameters
+  String url = String(OPENWEATHER_WEATHER_URL) + "?lat=" + String(CITY_LAT, 4) + "&lon=" + String(CITY_LON, 4) + 
+               "&appid=" + OPENWEATHER_API_KEY + "&units=metric";
+  
+  Serial.printf("[Weather] GET %s\n", url.c_str());
+  
+  http.begin(client, url);
+  int httpCode = http.GET();
+  
+  if (httpCode == HTTP_CODE_OK) {
+    String payload = http.getString();
+    
+    // Parse JSON
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, payload);
+    
+    if (!error) {
+      // Extract weather data
+      weatherData.temperature = doc["main"]["temp"];
+      weatherData.feels_like = doc["main"]["feels_like"];
+      weatherData.humidity = doc["main"]["humidity"];
+      weatherData.pressure = doc["main"]["pressure"];
+      weatherData.weather_description = doc["weather"][0]["description"].as<String>();
+      weatherData.wind_speed = doc["wind"]["speed"];
+      weatherData.last_update = millis();
+      
+      Serial.println("[Weather] Data fetched successfully");
+    } else {
+      Serial.print("[Weather] JSON parsing error: ");
+      Serial.println(error.f_str());
+    }
+  } else {
+    Serial.printf("[Weather] HTTP error: %d\n", httpCode);
+  }
+  
+  http.end();
+}
+
+/**
+ * Fetch Air Quality Data (AQI, PM2.5, PM10) from OpenWeather API
+ */
+void fetchAirQualityData() {
+  WiFiClient client;
+  HTTPClient http;
+  
+  // Build URL for Air Pollution API
+  String url = String(OPENWEATHER_AQI_URL) + "?lat=" + String(CITY_LAT, 4) + "&lon=" + String(CITY_LON, 4) + 
+               "&appid=" + OPENWEATHER_API_KEY;
+  
+  Serial.printf("[AQI] GET %s\n", url.c_str());
+  
+  http.begin(client, url);
+  int httpCode = http.GET();
+  
+  if (httpCode == HTTP_CODE_OK) {
+    String payload = http.getString();
+    
+    // Parse JSON
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, payload);
+    
+    if (!error) {
+      // Extract AQI and pollutant data
+      weatherData.aqi = doc["list"][0]["main"]["aqi"];
+      weatherData.pm25 = doc["list"][0]["components"]["pm2_5"];
+      weatherData.pm10 = doc["list"][0]["components"]["pm10"];
+      
+      Serial.println("[AQI] Data fetched successfully");
+    } else {
+      Serial.print("[AQI] JSON parsing error: ");
+      Serial.println(error.f_str());
+    }
+  } else {
+    Serial.printf("[AQI] HTTP error: %d\n", httpCode);
+  }
+  
+  http.end();
+}
+
+/**
+ * Print Weather Data to Serial Monitor
+ */
+void printWeatherData() {
+  Serial.println("\n========== Weather Data for Chiang Mai ==========");
+  Serial.print("Update Time: ");
+  Serial.println(weatherData.last_update);
+  
+  Serial.println("\n--- Temperature & Humidity ---");
+  Serial.printf("Temperature: %.2f°C\n", weatherData.temperature);
+  Serial.printf("Feels Like: %.2f°C\n", weatherData.feels_like);
+  Serial.printf("Humidity: %.0f%%\n", weatherData.humidity);
+  Serial.printf("Pressure: %.0f hPa\n", weatherData.pressure);
+  Serial.print("Weather: ");
+  Serial.println(weatherData.weather_description);
+  Serial.printf("Wind Speed: %.2f m/s\n", weatherData.wind_speed);
+  
+  Serial.println("\n--- Air Quality Index ---");
+  Serial.print("AQI Level: ");
+  switch(weatherData.aqi) {
+    case 1: Serial.println("Good"); break;
+    case 2: Serial.println("Fair"); break;
+    case 3: Serial.println("Moderate"); break;
+    case 4: Serial.println("Poor"); break;
+    case 5: Serial.println("Very Poor"); break;
+    default: Serial.println("Unknown");
+  }
+  
+  Serial.println("\n--- Particulate Matter ---");
+  Serial.printf("PM2.5: %.2f µg/m³\n", weatherData.pm25);
+  Serial.printf("PM10: %.2f µg/m³\n", weatherData.pm10);
+  
+  // Health recommendation based on AQI
+  Serial.println("\n--- Health Recommendation ---");
+  if (weatherData.aqi <= 2) {
+    Serial.println("Air quality is satisfactory.");
+  } else if (weatherData.aqi == 3) {
+    Serial.println("Members of sensitive groups should consider limiting outdoor activity.");
+  } else if (weatherData.aqi >= 4) {
+    Serial.println("Everyone should consider limiting outdoor activity.");
+  }
+  
+  Serial.println("==============================================\n");
+}
+
+/**
+ * Initialize OLED 0.96" I2C display.
+ */
+void initOLED() {
+  Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);
+
+  oled_available = display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS);
+  if (!oled_available) {
+    Serial.println("[OLED] Display not found at 0x3C");
+    return;
+  }
+
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.println("ESP32 Weather");
+  display.println("OLED Ready");
+  display.display();
+  Serial.println("[OLED] Display initialized");
+}
+
+/**
+ * Draw weather data and relay status on the OLED.
+ */
+void updateOLED() {
+  if (!oled_available) {
+    return;
+  }
+
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+
+  // Header
+  display.fillRect(0, 0, OLED_WIDTH, 11, SSD1306_WHITE);
+  display.setTextColor(SSD1306_BLACK);
+  display.setCursor(3, 2);
+  display.print(CITY_NAME);
+  display.setCursor(102, 2);
+  display.print(WiFi.status() == WL_CONNECTED ? "WiFi" : "AP");
+
+  display.setTextColor(SSD1306_WHITE);
+  display.drawLine(0, 13, OLED_WIDTH, 13, SSD1306_WHITE);
+
+  // Weather values
+  display.setCursor(0, 17);
+  display.print("Temp ");
+  if (weatherData.last_update > 0) {
+    display.print(weatherData.temperature, 1);
+    display.print("C");
+  } else {
+    display.print("--.-C");
+  }
+
+  display.setCursor(70, 17);
+  display.print("Hum ");
+  if (weatherData.last_update > 0) {
+    display.print(weatherData.humidity, 0);
+    display.print("%");
+  } else {
+    display.print("--%");
+  }
+
+  display.setCursor(0, 29);
+  display.print("AQI ");
+  if (weatherData.aqi > 0) {
+    display.print(weatherData.aqi);
+    display.print(" ");
+    display.print(getAQILabel(weatherData.aqi));
+  } else {
+    display.print("--");
+  }
+
+  display.setCursor(70, 29);
+  display.print("PM2.5 ");
+  if (weatherData.pm25 > 0.0) {
+    display.print(weatherData.pm25, 0);
+  } else {
+    display.print("--");
+  }
+
+  // Relay status strip
+  display.drawLine(0, 43, OLED_WIDTH, 43, SSD1306_WHITE);
+  drawRelayStatus(0, 48, "R1", relay1_state);
+  drawRelayStatus(43, 48, "R2", relay2_state);
+  drawRelayStatus(86, 48, "R3", relay3_state);
+
+  display.display();
+}
+
+/**
+ * Draw one relay pill. Filled means ON, outline means OFF.
+ */
+void drawRelayStatus(int x, int y, const char* label, bool state) {
+  display.drawRoundRect(x, y, 39, 14, 3, SSD1306_WHITE);
+
+  if (state) {
+    display.fillRoundRect(x, y, 39, 14, 3, SSD1306_WHITE);
+    display.setTextColor(SSD1306_BLACK);
+  } else {
+    display.setTextColor(SSD1306_WHITE);
+  }
+
+  display.setCursor(x + 4, y + 3);
+  display.print(label);
+  display.setCursor(x + 18, y + 3);
+  display.print(state ? "ON" : "OFF");
+  display.setTextColor(SSD1306_WHITE);
+}
+
+/**
+ * Convert OpenWeather AQI number to a compact display label.
+ */
+const char* getAQILabel(int aqi) {
+  switch (aqi) {
+    case 1: return "Good";
+    case 2: return "Fair";
+    case 3: return "Mod";
+    case 4: return "Poor";
+    case 5: return "Bad";
+    default: return "Unk";
+  }
 }
