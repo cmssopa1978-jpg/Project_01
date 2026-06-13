@@ -275,6 +275,197 @@ ESP32 GPIO17 ----[220Ω Resistor]----[Transistor Base/Gate]
                                           GND
 ```
 
+## 15. การควบคุม Switch / ปุ่มกด (Switch Control)
+
+บอร์ด ESP32 DevKit V2 นี้รองรับการควบคุม Switch แบบ Active Low ดังนี้:
+
+### ตารางการกำหนด Switch
+
+| Switch | GPIO Pin | สถานะ | Pull-up | หมายเหตุ |
+|--------|----------|--------|---------|---------|
+| **SW1** | GPIO34 | Active Low | External | ปกติ High, กดลง = Low |
+| **SW2** | GPIO35 | Active Low | External | ปกติ High, กดลง = Low |
+| **SW3** | GPIO32 | Active Low | External | ปกติ High, กดลง = Low |
+
+### ตัวอย่างการเขียนโปรแกรมอ่าน Switch
+
+```cpp
+#include <Arduino.h>
+
+// กำหนด GPIO Pins สำหรับ Switch
+#define SWITCH1_PIN 34
+#define SWITCH2_PIN 35
+#define SWITCH3_PIN 32
+
+// ตัวแปรเก็บสถานะเดิม (สำหรับ Debouncing)
+int sw1_prev_state = HIGH;
+int sw2_prev_state = HIGH;
+int sw3_prev_state = HIGH;
+
+void setup() {
+  Serial.begin(115200);
+  
+  // ตั้งค่า Switch Pins เป็น INPUT
+  pinMode(SWITCH1_PIN, INPUT);
+  pinMode(SWITCH2_PIN, INPUT);
+  pinMode(SWITCH3_PIN, INPUT);
+  
+  Serial.println("========================================");
+  Serial.println("     Switch Control System Started");
+  Serial.println("========================================");
+  Serial.println("SW1 (GPIO34) - Active Low with Pull-up");
+  Serial.println("SW2 (GPIO35) - Active Low with Pull-up");
+  Serial.println("SW3 (GPIO32) - Active Low with Pull-up");
+  Serial.println("========================================");
+}
+
+void loop() {
+  // อ่านสถานะ Switch
+  int sw1_current = digitalRead(SWITCH1_PIN);
+  int sw2_current = digitalRead(SWITCH2_PIN);
+  int sw3_current = digitalRead(SWITCH3_PIN);
+  
+  // ตรวจสอบ SW1
+  if (sw1_current != sw1_prev_state) {
+    delay(20);  // Debouncing
+    sw1_current = digitalRead(SWITCH1_PIN);
+    
+    if (sw1_current == LOW) {
+      Serial.println("[SW1] Button Pressed!");
+    } else {
+      Serial.println("[SW1] Button Released!");
+    }
+    sw1_prev_state = sw1_current;
+  }
+  
+  // ตรวจสอบ SW2
+  if (sw2_current != sw2_prev_state) {
+    delay(20);  // Debouncing
+    sw2_current = digitalRead(SWITCH2_PIN);
+    
+    if (sw2_current == LOW) {
+      Serial.println("[SW2] Button Pressed!");
+    } else {
+      Serial.println("[SW2] Button Released!");
+    }
+    sw2_prev_state = sw2_current;
+  }
+  
+  // ตรวจสอบ SW3
+  if (sw3_current != sw3_prev_state) {
+    delay(20);  // Debouncing
+    sw3_current = digitalRead(SWITCH3_PIN);
+    
+    if (sw3_current == LOW) {
+      Serial.println("[SW3] Button Pressed!");
+    } else {
+      Serial.println("[SW3] Button Released!");
+    }
+    sw3_prev_state = sw3_current;
+  }
+  
+  delay(10);
+}
+```
+
+### ฟังก์ชันช่วยสำหรับการอ่าน Switch
+
+```cpp
+// ฟังก์ชันอ่าน Switch แบบ Active Low (มี Debouncing)
+bool isSwitchPressed(int switchPin) {
+  if (digitalRead(switchPin) == LOW) {
+    delay(20);  // Debouncing
+    if (digitalRead(switchPin) == LOW) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// ฟังก์ชันตรวจสอบการกดปุ่มแบบ One-Shot
+bool isSwitchPressedOnce(int switchPin, int& prevState) {
+  int currentState = digitalRead(switchPin);
+  
+  if (currentState != prevState) {
+    delay(20);  // Debouncing
+    currentState = digitalRead(switchPin);
+    
+    if (currentState == LOW && prevState == HIGH) {
+      prevState = currentState;
+      return true;
+    }
+    prevState = currentState;
+  }
+  return false;
+}
+
+// ตัวอย่างการใช้งาน
+void exampleUsage() {
+  static int prev_state = HIGH;
+  
+  if (isSwitchPressedOnce(SWITCH1_PIN, prev_state)) {
+    Serial.println("SW1 Detected!");
+  }
+}
+```
+
+### ข้อควรระวังเกี่ยวกับ Switch
+
+1. **Active Low Logic:** 
+   - `HIGH` (3.3V) = Switch OFF (ปุ่มไม่ถูกกด)
+   - `LOW` (0V) = Switch ON (ปุ่มถูกกด)
+
+2. **External Pull-up:** Switch มี External Pull-up ดังนั้นไม่ต้องเปิด Internal Pull-up
+   ```cpp
+   pinMode(SWITCH1_PIN, INPUT);  // ไม่ต้องใช้ INPUT_PULLUP
+   ```
+
+3. **Debouncing:** ปุ่มกดอาจมี Bouncing (กระดุมแสดงการเปลี่ยนแปลงเร็ว ๆ) ต้องใช้ Debouncing delay ประมาณ 20 ms
+
+4. **GPIO34 & GPIO35 เป็น Input Only:** 
+   - GPIO34 และ GPIO35 เป็นขา Input Only ไม่สามารถเป็น Output ได้
+   - GPIO32 สามารถเป็น Input หรือ Output ได้
+
+5. **Capacitive Touch Optional:** GPIO34, 35, 32 สามารถใช้เป็น Capacitive Touch Input ได้หากต้องการ
+
+### แผนวงจร (Circuit Diagram)
+
+```
+           3.3V
+             |
+           10K Ω (Pull-up)
+             |
+    ─────────○─────── GPIO34/35/32
+             |
+           Switch
+             |
+            GND
+```
+
+### ตัวอย่างการประยุกต์ใช้
+
+```cpp
+// ตัวอย่าง: ใช้ Switch เพื่อควบคุม Relay
+void setup() {
+  pinMode(SWITCH1_PIN, INPUT);
+  pinMode(RELAY1_PIN, OUTPUT);
+  digitalWrite(RELAY1_PIN, HIGH);  // ปิด Relay
+}
+
+void loop() {
+  if (digitalRead(SWITCH1_PIN) == LOW) {
+    // ถ้ากดปุ่ม = เปิด Relay
+    digitalWrite(RELAY1_PIN, LOW);
+    Serial.println("Relay ON");
+  } else {
+    // ถ้าปล่อยปุ่ม = ปิด Relay
+    digitalWrite(RELAY1_PIN, HIGH);
+    Serial.println("Relay OFF");
+  }
+  delay(50);
+}
+```
+
 ---
 *เอกสารนี้ถูกจัดทำขึ้นเพื่อใช้ร่วมกับโปรเจกต์ใน PlatformIO*
 *ปรับปรุงล่าสุด: 2026-06-13*
