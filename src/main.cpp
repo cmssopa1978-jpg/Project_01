@@ -9,7 +9,7 @@
 #include <Adafruit_SSD1306.h>
 
 // ========== OpenWeather API Configuration ==========
-#define OPENWEATHER_API_KEY "YOUR_OPENWEATHER_API_KEY"  // Set your OpenWeather API key (see Telegram.md for secure storage suggestions)
+#define OPENWEATHER_API_KEY "03169a21d57223736ed597768ebad921"  // Set your OpenWeather API key (see Telegram.md for secure storage suggestions)
 #define CITY_NAME "Chiang Mai"
 #define CITY_LAT 18.7883
 #define CITY_LON 98.9853
@@ -18,8 +18,8 @@
 #define OPENWEATHER_AQI_URL "http://api.openweathermap.org/data/2.5/air_pollution"
 
 // ========== Telegram Bot Configuration ==========
-#define TELEGRAM_BOT_TOKEN "YOUR_TELEGRAM_BOT_TOKEN"    // Replace with Bot Token from @BotFather or set via external config
-#define TELEGRAM_CHAT_ID "YOUR_TELEGRAM_CHAT_ID"    // Replace with numeric chat_id (use Telegram.md to obtain)
+#define TELEGRAM_BOT_TOKEN "8828476817:AAFAweVGNF6Th3EIQjbuILQAgTTpW8Ug8Lo"    // Replace with Bot Token from @BotFather or set via external config
+#define TELEGRAM_CHAT_ID "7861019137"    // Replace with numeric chat_id (use Telegram.md to obtain)
 #define TELEGRAM_API_URL "https://api.telegram.org/bot"  // base URL without a trailing slash
 
 // ========== OLED Display Configuration ==========
