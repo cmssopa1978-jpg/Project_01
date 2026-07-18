@@ -2,19 +2,25 @@
 #include <WiFi.h>
 #include <WiFiManager.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
 // ========== OpenWeather API Configuration ==========
-#define OPENWEATHER_API_KEY "03169a21d57223736ed597768ebad921"  // Get from https://openweathermap.org/api
+#define OPENWEATHER_API_KEY "YOUR_OPENWEATHER_API_KEY"  // Set your OpenWeather API key (see Telegram.md for secure storage suggestions)
 #define CITY_NAME "Chiang Mai"
 #define CITY_LAT 18.7883
 #define CITY_LON 98.9853
 #define WEATHER_UPDATE_INTERVAL 60000   // 1 minute in milliseconds
 #define OPENWEATHER_WEATHER_URL "http://api.openweathermap.org/data/2.5/weather"
 #define OPENWEATHER_AQI_URL "http://api.openweathermap.org/data/2.5/air_pollution"
+
+// ========== Telegram Bot Configuration ==========
+#define TELEGRAM_BOT_TOKEN "YOUR_TELEGRAM_BOT_TOKEN"    // Replace with Bot Token from @BotFather or set via external config
+#define TELEGRAM_CHAT_ID "YOUR_TELEGRAM_CHAT_ID"    // Replace with numeric chat_id (use Telegram.md to obtain)
+#define TELEGRAM_API_URL "https://api.telegram.org/bot"  // base URL without a trailing slash
 
 // ========== OLED Display Configuration ==========
 #define OLED_SDA_PIN 21
@@ -100,6 +106,11 @@ void resetWiFiConfiguration();
 void fetchWeatherData();
 void fetchAirQualityData();
 void printWeatherData();
+bool isTelegramConfigured();
+bool sendTelegramMessage(const String& message);
+String urlEncode(const String& value);
+String formatRelayTelegramMessage(const char* relayName, bool relayState);
+String formatWeatherTelegramMessage();
 void initOLED();
 void updateOLED();
 void showOLEDStatus(const char* title, const char* line1 = "", const char* line2 = "");
@@ -169,6 +180,8 @@ void setup() {
     delay(1500);
   } else {
     showOLEDStatus("WiFi Connected", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
+    sendTelegramMessage(String("ESP32 started\nWiFi connected: ") + WiFi.SSID() +
+                        "\nIP: " + WiFi.localIP().toString());
     delay(1500);
   }
   clearOLEDStatus();
@@ -208,6 +221,7 @@ void loop() {
       fetchWeatherData();
       fetchAirQualityData();
       printWeatherData();
+      sendTelegramMessage(formatWeatherTelegramMessage());
       updateOLED();
     }
   }
@@ -240,6 +254,7 @@ void loop() {
       toggleRelay(RELAY1_PIN, relay1_state);
       Serial.println("[EVENT] SW1 (GPIO34) Pressed -> Relay1 (GPIO17) Toggled");
       Serial.printf("Relay1 is now: %s\n", relay1_state ? "ON" : "OFF");
+      sendTelegramMessage(formatRelayTelegramMessage("Relay1", relay1_state));
       updateOLED();
     }
     
@@ -248,6 +263,7 @@ void loop() {
       toggleRelay(RELAY2_PIN, relay2_state);
       Serial.println("[EVENT] SW2 (GPIO35) Pressed -> Relay2 (GPIO16) Toggled");
       Serial.printf("Relay2 is now: %s\n", relay2_state ? "ON" : "OFF");
+      sendTelegramMessage(formatRelayTelegramMessage("Relay2", relay2_state));
       updateOLED();
     }
     
@@ -256,6 +272,7 @@ void loop() {
       toggleRelay(RELAY3_PIN, relay3_state);
       Serial.println("[EVENT] SW3 (GPIO32) Pressed -> Relay3 (GPIO4) Toggled");
       Serial.printf("Relay3 is now: %s\n", relay3_state ? "ON" : "OFF");
+      sendTelegramMessage(formatRelayTelegramMessage("Relay3", relay3_state));
       updateOLED();
     }
   }
@@ -366,6 +383,7 @@ void resetWiFiConfiguration() {
   Serial.println("\n========== WiFi Reset Starting ==========");
   Serial.println("[WiFi] Resetting saved WiFi configuration...");
   showOLEDStatus("WiFi Reset", "Clearing saved", "settings...");
+  sendTelegramMessage("ESP32 WiFi settings reset requested. Restarting...");
   
   // Reset WiFi settings
   wifiManager.resetSettings();
@@ -541,6 +559,135 @@ void printWeatherData() {
   }
   
   Serial.println("==============================================\n");
+}
+
+/**
+ * Check whether Telegram Bot Token and Chat ID are configured.
+ */
+bool isTelegramConfigured() {
+  return strcmp(TELEGRAM_BOT_TOKEN, "YOUR_TELEGRAM_BOT_TOKEN") != 0 &&
+         strcmp(TELEGRAM_CHAT_ID, "YOUR_TELEGRAM_CHAT_ID") != 0;
+}
+
+/**
+ * Send a message to Telegram via Bot API.
+ */
+bool sendTelegramMessage(const String& message) {
+  if (!isTelegramConfigured()) {
+    Serial.println("[Telegram] Skipped: Bot token or chat ID is not configured");
+    return false;
+  }
+
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[Telegram] Skipped: WiFi is not connected");
+    return false;
+  }
+
+  WiFiClientSecure client;
+  HTTPClient http;
+  client.setInsecure();
+
+  String url = String(TELEGRAM_API_URL) + TELEGRAM_BOT_TOKEN + "/sendMessage";
+  String body = "chat_id=" + urlEncode(TELEGRAM_CHAT_ID) +
+                "&text=" + urlEncode(message) +
+                "&disable_web_page_preview=true";
+
+  Serial.println("[Telegram] Sending message...");
+  Serial.print("[Telegram] URL: ");
+  Serial.println(url);
+  Serial.print("[Telegram] Body: ");
+  Serial.println(body);
+
+  http.begin(client, url);
+  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+  int httpCode = http.POST(body);
+
+  if (httpCode == HTTP_CODE_OK) {
+    Serial.println("[Telegram] Message sent");
+    http.end();
+    return true;
+  }
+
+  String payload = http.getString();
+  Serial.printf("[Telegram] Send failed, HTTP code: %d\n", httpCode);
+  if (payload.length() > 0) {
+    Serial.print("[Telegram] Response: ");
+    Serial.println(payload);
+  }
+  http.end();
+  return false;
+}
+
+/**
+ * URL-encode text for Telegram form POST body.
+ */
+String urlEncode(const String& value) {
+  const char* hex = "0123456789ABCDEF";
+  String encoded = "";
+
+  for (size_t i = 0; i < value.length(); i++) {
+    uint8_t c = value[i];
+
+    if ((c >= 'A' && c <= 'Z') ||
+        (c >= 'a' && c <= 'z') ||
+        (c >= '0' && c <= '9') ||
+        c == '-' || c == '_' || c == '.' || c == '~') {
+      encoded += char(c);
+    } else if (c == ' ') {
+      encoded += '+';
+    } else {
+      encoded += '%';
+      encoded += hex[(c >> 4) & 0x0F];
+      encoded += hex[c & 0x0F];
+    }
+  }
+
+  return encoded;
+}
+
+/**
+ * Format relay status notification.
+ */
+String formatRelayTelegramMessage(const char* relayName, bool relayState) {
+  String message = "ESP32 Relay Update\n";
+  message += relayName;
+  message += ": ";
+  message += relayState ? "ON" : "OFF";
+  message += "\nR1: ";
+  message += relay1_state ? "ON" : "OFF";
+  message += " | R2: ";
+  message += relay2_state ? "ON" : "OFF";
+  message += " | R3: ";
+  message += relay3_state ? "ON" : "OFF";
+  return message;
+}
+
+/**
+ * Format OpenWeather data notification.
+ */
+String formatWeatherTelegramMessage() {
+  String message = "ESP32 Weather Update - ";
+  message += CITY_NAME;
+  message += "\nTemp: ";
+  message += String(weatherData.temperature, 1);
+  message += " C";
+  message += "\nHum: ";
+  message += String(weatherData.humidity, 0);
+  message += "%";
+  message += "\nAQI: ";
+  message += String(weatherData.aqi);
+  message += " ";
+  message += getAQILabel(weatherData.aqi);
+  message += "\nPM2.5: ";
+  message += String(weatherData.pm25, 1);
+  message += " ug/m3";
+  message += "\nRelay: R1 ";
+  message += relay1_state ? "ON" : "OFF";
+  message += ", R2 ";
+  message += relay2_state ? "ON" : "OFF";
+  message += ", R3 ";
+  message += relay3_state ? "ON" : "OFF";
+  return message;
 }
 
 /**

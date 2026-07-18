@@ -17,6 +17,7 @@
 - [วิธีใช้งาน WiFiManager](#วิธีใช้งาน-wifimanager)
 - [การ Reset WiFi ด้วย SW1](#การ-reset-wifi-ด้วย-sw1)
 - [การแสดงผลบน OLED](#การแสดงผลบน-oled)
+- [การแจ้งเตือนผ่าน Telegram](#การแจ้งเตือนผ่าน-telegram)
 - [OpenWeather API](#openweather-api)
 - [Logic การทำงานของ Relay และ Switch](#logic-การทำงานของ-relay-และ-switch)
 - [ข้อควรระวังด้าน Hardware](#ข้อควรระวังด้าน-hardware)
@@ -41,7 +42,8 @@
    - PM2.5
    - สถานะ Relay 1-3
    - สถานะระหว่าง setup/connect WiFi
-7. แสดง log การทำงานผ่าน Serial Monitor ที่ `115200`
+7. แจ้งเตือนสถานะสำคัญไปยัง Telegram
+8. แสดง log การทำงานผ่าน Serial Monitor ที่ `115200`
 
 ## Hardware ที่ใช้
 
@@ -117,7 +119,7 @@ lib_deps =
 | ArduinoJson | parse JSON จาก OpenWeather API |
 | Adafruit SSD1306 | ควบคุมจอ OLED SSD1306 |
 | Adafruit GFX Library | วาด text, line, shape บน OLED |
-| WiFi / HTTPClient / Wire | library ของ Arduino ESP32 framework |
+| WiFi / HTTPClient / WiFiClientSecure / Wire | library ของ Arduino ESP32 framework |
 
 ## โครงสร้างไฟล์สำคัญ
 
@@ -150,13 +152,15 @@ platform = espressif32
 board = esp32doit-devkit-v1
 framework = arduino
 monitor_speed = 115200
-upload_port = COM4
+upload_port = COM6
 upload_speed = 115200
 ```
 
 หมายเหตุ:
 - ถ้า ESP32 ของคุณไม่ได้อยู่ที่ `COM4` ให้แก้ `upload_port` ให้ตรงกับเครื่อง เช่น `COM3`, `COM5`
 - ใช้ `upload_speed = 115200` เพื่อเพิ่มความเสถียรในการ upload
+
+ปัจจุบันบนเครื่องนี้ตั้งค่าเป็น `COM6` (อัปเดต: 2026-07-18)
 
 ## วิธีเปิดโปรแกรมด้วย VS Code
 
@@ -293,6 +297,86 @@ R1 ON/OFF  R2 ON/OFF  R3 ON/OFF
 
 Relay ที่เป็น ON จะแสดงเป็นกล่องพื้นขาว ตัวอักษรสีดำ ส่วน OFF จะแสดงเป็นกรอบ
 
+## การแจ้งเตือนผ่าน Telegram
+
+โปรแกรมรองรับการส่งข้อความแจ้งเตือนไปยัง Telegram ผ่าน Telegram Bot API โดยไม่ต้องติดตั้ง library เพิ่ม ใช้ `HTTPClient` และ `WiFiClientSecure` ของ ESP32
+
+### สิ่งที่ Telegram จะแจ้งเตือน
+
+- ESP32 เริ่มทำงานและเชื่อมต่อ WiFi สำเร็จ
+- มีการ reset การตั้งค่า WiFi ด้วย SW1
+- Relay 1, Relay 2, Relay 3 เปลี่ยนสถานะ
+- รายงานข้อมูล OpenWeather ทุกครั้งที่มีการอัปเดตข้อมูล:
+  - Temp
+  - Hum
+  - AQI
+  - PM2.5
+  - สถานะ Relay ทั้ง 3 ช่อง
+
+### วิธีสร้าง Telegram Bot
+
+1. เปิด Telegram แล้วค้นหา `@BotFather`
+2. ส่งคำสั่ง `/newbot`
+3. ตั้งชื่อ bot และ username ตามขั้นตอน
+4. BotFather จะส่ง **Bot Token** มาให้
+5. เก็บ token นี้ไว้ใช้ใน `src/main.cpp`
+
+### วิธีหา Chat ID
+
+1. ส่งข้อความหา bot ของคุณอย่างน้อย 1 ข้อความ
+2. เปิด URL นี้ใน browser โดยเปลี่ยน `<BOT_TOKEN>` เป็น token จริง:
+
+```text
+https://api.telegram.org/bot<BOT_TOKEN>/getUpdates
+```
+
+3. มองหา `"chat":{"id":...}` ค่าเลข `id` คือ Chat ID
+
+### วิธีเปิดใช้งาน Telegram ในโปรแกรม
+
+แก้ค่าใน `src/main.cpp`:
+
+```cpp
+#define TELEGRAM_BOT_TOKEN "YOUR_TELEGRAM_BOT_TOKEN"
+#define TELEGRAM_CHAT_ID "YOUR_TELEGRAM_CHAT_ID"
+```
+
+ตัวอย่าง:
+
+```cpp
+#define TELEGRAM_BOT_TOKEN "123456789:ABCDEFxxxxxxxxxxxxxxxx"
+#define TELEGRAM_CHAT_ID "123456789"
+```
+
+ถ้ายังไม่ได้แก้ 2 ค่านี้ โปรแกรมจะไม่ส่ง Telegram และจะแสดง log:
+
+```text
+[Telegram] Skipped: Bot token or chat ID is not configured
+```
+
+ข้อควรระวัง:
+
+- อย่าเผยแพร่ Bot Token ลง GitHub หรือส่งต่อให้ผู้อื่น
+- ถ้า token หลุด ให้ไปที่ BotFather แล้ว revoke token ใหม่
+- Telegram จะส่งได้เมื่อ ESP32 เชื่อมต่อ WiFi และออกอินเทอร์เน็ตได้แล้วเท่านั้น
+
+### ปัญหาที่พบบ่อย: "Bad Request: chat not found"
+
+- สาเหตุที่พบบ่อย: `TELEGRAM_CHAT_ID` ผิดหรือบอทยังไม่ได้เริ่มการสนทนากับผู้รับ
+- วิธีแก้ไข:
+  1. ถ้าเป็นแชทส่วนตัว ให้ผู้ใช้เริ่มคุยกับบอทก่อน (ส่งข้อความ `/start`) แล้วเรียก
+    `https://api.telegram.org/bot<BOT_TOKEN>/getUpdates` เพื่อดู `chat.id`
+  2. ถ้าเป็นกลุ่ม ให้เพิ่มบอทเข้าไปในกลุ่มก่อน และใช้ `getUpdates` เพื่อหาค่า `chat.id`
+    - สำหรับ supergroup/ช่อง ค่า `chat_id` อาจมีรูปแบบ `-100xxxxxxxxxx`
+  3. หากต้องการทดสอบเบื้องต้น ให้เรียก `getMe` เพื่อยืนยันว่า token ถูกต้อง:
+
+```
+https://api.telegram.org/bot<YOUR_TOKEN>/getMe
+```
+
+หลังแก้ค่า `TELEGRAM_BOT_TOKEN` และ `TELEGRAM_CHAT_ID` ให้ทดลองรันและดู Serial Log
+เพื่อยืนยันว่าการส่งสำเร็จ (จะเห็นสถานะ `[Telegram] Message sent`)
+
 ## OpenWeather API
 
 โปรแกรมดึงข้อมูลจาก:
@@ -406,8 +490,15 @@ PermissionError(13, 'Access is denied.')
 - WiFiManager config portal
 - OLED dashboard
 - OLED setup/connect status
+- Telegram notification
 - OpenWeather weather + AQI
 - PlatformIO build ผ่าน
+
+สถานะปัจจุบัน (อัปเดต: 2026-07-18):
+
+- `upload_port` ถูกตั้งเป็น `COM6` ใน `platformio.ini` (เครื่องนี้)
+- พยายามอัปโหลด: Build สำเร็จ แต่การอัปโหลดล้มเหลวเพราะพอร์ต `COM6` ถูกล็อค/ถูกปฏิเสธสิทธิ์ (ลองปิด Serial Monitor หรือเรียก VS Code เป็นผู้ดูแลหรือถอดสาย USB แล้วเสียบใหม่)
+- การส่ง Telegram: โค้ดแก้ไขให้สร้าง URL ถูกต้องแล้ว แต่ได้รับข้อผิดพลาด `400 Bad Request: chat not found` — แก้ที่ `TELEGRAM_CHAT_ID` หรือให้ผู้ใช้เริ่มคุยกับบอท/เพิ่มบอทเข้าไปในกลุ่ม
 
 ## คำสั่งที่ใช้บ่อย
 
