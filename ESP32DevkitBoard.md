@@ -1,6 +1,6 @@
-# ESP32 DevKit V2 Board Details
+# ESP32 DevKit Board Details
 
-บอร์ดพัฒนา **ESP32 DevKit V2** เป็นโมดูลไมโครคอนโทรลเลอร์ที่มีประสิทธิภาพสูง รองรับการเชื่อมต่อไร้สายทั้ง Wi-Fi และ Bluetooth ในตัว เหมาะสำหรับงานด้าน IoT (Internet of Things)
+บอร์ดพัฒนา **DOIT ESP32 DevKit V1** เป็นโมดูลไมโครคอนโทรลเลอร์ที่มีประสิทธิภาพสูง รองรับการเชื่อมต่อไร้สายทั้ง Wi-Fi และ Bluetooth ในตัว เหมาะสำหรับงานด้าน IoT (Internet of Things)
 
 ## 1. ข้อมูลทางเทคนิค (Technical Specifications)
 
@@ -26,7 +26,7 @@
 - **Hardware Encryption:** AES, SHA-2, RSA, ECC, RNG
 
 ## 3. ขาใช้งานที่สำคัญ (Pinout Summary)
-เนื่องจากบอร์ด V2 มักจะมี 38 ขา ต่อไปนี้คือกลุ่มขาที่ควรทราบ:
+เนื่องจากบอร์ด DevKit มักจะมี 38 ขา ต่อไปนี้คือกลุ่มขาที่ควรทราบ:
 
 ### แหล่งจ่ายไฟ (Power)
 - **5V / Vin:** รับไฟเข้า 5V จาก USB หรือแหล่งจ่ายภายนอก
@@ -232,7 +232,7 @@ void loop() {
 
 ## 14. การควบคุม Relay (Relay Control)
 
-บอร์ด ESP32 DevKit V2 นี้รองรับการควบคุม Relay แบบ Active Low ดังนี้:
+บอร์ด ESP32 DevKit V1 / DOIT ESP32 DevKit V1 นี้รองรับการควบคุม Relay แบบ Active Low ดังนี้:
 
 ### ตารางการกำหนด Relay
 
@@ -347,7 +347,7 @@ ESP32 GPIO17 ----[220Ω Resistor]----[Transistor Base/Gate]
 
 ## 15. การควบคุม Switch / ปุ่มกด (Switch Control)
 
-บอร์ด ESP32 DevKit V2 นี้รองรับการควบคุม Switch แบบ Active Low ดังนี้:
+บอร์ด ESP32 DevKit V1 / DOIT ESP32 DevKit V1 นี้รองรับการควบคุม Switch แบบ Active Low ดังนี้:
 
 ### ตารางการกำหนด Switch
 

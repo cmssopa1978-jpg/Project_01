@@ -157,7 +157,7 @@ upload_speed = 115200
 ```
 
 หมายเหตุ:
-- ถ้า ESP32 ของคุณไม่ได้อยู่ที่ `COM4` ให้แก้ `upload_port` ให้ตรงกับเครื่อง เช่น `COM3`, `COM5`
+- ถ้า ESP32 ของคุณไม่ได้อยู่ที่ `COM6` ให้แก้ `upload_port` ให้ตรงกับเครื่อง เช่น `COM3`, `COM5`
 - ใช้ `upload_speed = 115200` เพื่อเพิ่มความเสถียรในการ upload
 
 ปัจจุบันบนเครื่องนี้ตั้งค่าเป็น `COM6` (อัปเดต: 2026-07-18)
@@ -205,7 +205,7 @@ C:\Users\Dell\.platformio\penv\Scripts\platformio.exe run
 C:\Users\Dell\.platformio\penv\Scripts\platformio.exe run --target upload
 ```
 
-ถ้า upload ไม่ผ่านและขึ้นว่า `COM4 busy` หรือ `Access is denied`:
+ถ้า upload ไม่ผ่านและขึ้นว่า `COM6 busy` หรือ `Access is denied` (หรือพอร์ตอื่น ๆ ถูกใช้งาน):
 
 - ปิด Serial Monitor ใน VS Code
 - ปิด Arduino IDE, PuTTY หรือโปรแกรมอื่นที่ใช้ COM port
@@ -332,6 +332,8 @@ https://api.telegram.org/bot<BOT_TOKEN>/getUpdates
 
 3. มองหา `"chat":{"id":...}` ค่าเลข `id` คือ Chat ID
 
+ดูรายละเอียดเพิ่มเติมได้ใน `Telegram.md`
+
 ### วิธีเปิดใช้งาน Telegram ในโปรแกรม
 
 แก้ค่าใน `src/main.cpp`:
@@ -347,6 +349,18 @@ https://api.telegram.org/bot<BOT_TOKEN>/getUpdates
 #define TELEGRAM_BOT_TOKEN "123456789:ABCDEFxxxxxxxxxxxxxxxx"
 #define TELEGRAM_CHAT_ID "123456789"
 ```
+
+> หมายเหตุ: หากต้องการจัดเก็บค่า secret ให้สร้างไฟล์ `config.h` ข้างนอก `src/` และเพิ่ม `config.h` ลงใน `.gitignore`
+>
+> ตัวอย่าง `config.h`:
+>
+> ```cpp
+> #define OPENWEATHER_API_KEY "YOUR_OPENWEATHER_API_KEY"
+> #define TELEGRAM_BOT_TOKEN "YOUR_TELEGRAM_BOT_TOKEN"
+> #define TELEGRAM_CHAT_ID "YOUR_TELEGRAM_CHAT_ID"
+> ```
+>
+> จากนั้นเพิ่ม `#include "config.h"` ใน `src/main.cpp`
 
 ถ้ายังไม่ได้แก้ 2 ค่านี้ โปรแกรมจะไม่ส่ง Telegram และจะแสดง log:
 
@@ -409,8 +423,8 @@ https://api.telegram.org/bot<YOUR_TOKEN>/getMe
 - PM10 ใช้ใน Serial Monitor แต่ไม่ได้แสดงบน OLED
 
 ข้อสำคัญ:
-- ใน `src/main.cpp` มี API key ของ OpenWeather อยู่ในโค้ด
-- หากนำโปรเจกต์ไปเผยแพร่ ควรเปลี่ยน API key หรือย้ายไปเก็บในไฟล์ config ที่ไม่ commit ขึ้น repository
+- ใน `src/main.cpp` มี placeholder สำหรับ OpenWeather API key อยู่ในโค้ด
+- หากนำโปรเจกต์ไปเผยแพร่ ควรเก็บ API key และ Telegram secret ในไฟล์ config ที่ไม่ commit ขึ้น repository
 
 ## Logic การทำงานของ Relay และ Switch
 
@@ -444,7 +458,7 @@ HIGH = Relay OFF
 ข้อความตัวอย่าง:
 
 ```text
-Could not open COM4, the port is busy or doesn't exist.
+Could not open COMx, the port is busy or doesn't exist.
 PermissionError(13, 'Access is denied.')
 ```
 

@@ -23,6 +23,25 @@ https://api.telegram.org/bot<BOT_TOKEN>/getUpdates
 3. หาในผลลัพธ์ JSON ค่า `"chat":{"id": <number>}` นั่นคือ `chat_id` ที่ต้องใช้
 - สำหรับ supergroup/ช่อง ค่า `chat_id` อาจอยู่ในรูปแบบ `-1001234567890`
 
+## เก็บค่าคอนฟิกอย่างปลอดภัย
+หากต้องการเก็บ `TELEGRAM_BOT_TOKEN` และ `TELEGRAM_CHAT_ID` ให้แยกออกเป็นไฟล์ config ที่ไม่ commit ลง repository เช่น `config.h`
+
+ตัวอย่าง `config.h`:
+
+```cpp
+#define OPENWEATHER_API_KEY "YOUR_OPENWEATHER_API_KEY"
+#define TELEGRAM_BOT_TOKEN "YOUR_TELEGRAM_BOT_TOKEN"
+#define TELEGRAM_CHAT_ID "YOUR_TELEGRAM_CHAT_ID"
+```
+
+จากนั้นใน `src/main.cpp` ให้เพิ่ม:
+
+```cpp
+#include "config.h"
+```
+
+และเพิ่ม `config.h` ลงใน `.gitignore` เพื่อป้องกันการเผยแพร่ค่า secret
+
 ## วิธีทดสอบ token
 - เรียก:
 
@@ -45,8 +64,8 @@ https://api.telegram.org/bot<YOUR_TOKEN>/getMe
 
 ## ตัวอย่างค่าใน `src/main.cpp`
 ```cpp
-#define TELEGRAM_BOT_TOKEN "YOUR_TELEGRAM_BOT_TOKEN"  //HTTP API or BOT TOKEN : "8828476817:AAFAweVGNF6Th3EIQjbuILQAgTTpW8Ug8Lo"
-#define TELEGRAM_CHAT_ID "YOUR_TELEGRAM_CHAT_ID"  //Chat ID : "7861019137"
+#define TELEGRAM_BOT_TOKEN "YOUR_TELEGRAM_BOT_TOKEN"
+#define TELEGRAM_CHAT_ID "YOUR_TELEGRAM_CHAT_ID"
 ```
 
 ## ขั้นตอนถัดไปที่ผมช่วยได้
